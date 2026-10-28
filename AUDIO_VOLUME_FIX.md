@@ -1,26 +1,26 @@
-# Volume Stuck Max di ROM Port (vendor Xiaomi `parrot`)
+# Volume Stuck at Max on ROM Port (Xiaomi `parrot` Vendor)
 
-**Device:** `Redmi Note 15 5G` (codename `kunzite`) — menjalankan ROM port Motorola HelloUI yang memakai vendor Xiaomi Redmi Note (`ro.board.platform=parrot`).
+**Device:** `Redmi Note 15 5G` (codename `kunzite`) — running a Motorola HelloUI ROM port that uses an Xiaomi Redmi vendor (`ro.board.platform=parrot`).
 **Target Android:** 17 · **Vendor OS:** Android 15 (HyperOS `OS2.0.203.0.VPQCNXM`)
-**Tanggal:** 2026-10-10
+**Date:** 2026-10-10
 
 ---
 
-## 1. Gejala
+## 1. Symptoms
 
-Di ROM port non-Xiaomi yang memakai vendor Xiaomi `parrot`:
+On non-Xiaomi ROM ports that use an Xiaomi `parrot` vendor:
 
-- Slider volume **mentok** di angka tertinggi, tetapi suara tetap maksimal — tidak ada gradasi.
-- Sound effect / audio policy **tidak termuat** dengan benar.
-- Setiap kali tombol volume ditekan, log走出 error policy.
+- The volume slider is **stuck** at the top step — the sound is always at full volume, with no gradation.
+- Sound effects / audio policy do not load correctly.
+- Every time a volume key is pressed, policy errors appear in the log.
 
-Bandingkan dengan ROM port yang memakai **vendor AOSP** (`aosp/vendor`): volume normal, bertingkat.
+Compare this with ROM ports that use an **AOSP vendor** (`aosp/vendor`): volume behaves normally, with smooth steps.
 
 ---
 
-## 2. Akar Masalah
+## 2. Root Cause
 
-Empat file volume engine Xiaomi disuntikkan ke partisi **ODM**:
+Four Xiaomi volume engine files are injected into the **ODM** partition:
 
 ```
 /odm/etc/audio_policy_engine_configuration_mi.xml        993 B
@@ -29,19 +29,19 @@ Empat file volume engine Xiaomi disuntikkan ke partisi **ODM**:
 /odm/etc/audio_policy_engine_stream_volumes_mi.xml       22557 B
 ```
 
-Suffix `_mi` = **MIUI/HyperOS**. File-file ini bukan generic AOSP —它们 punya device category dan strategy yang dirancang untuk device Xiaomi tertentu, dan **tidak ada** di vendor Xiaomi asli (`aosp/odm/etc/` tidak punya satu pun file `audio_policy_engine_*`).
+The `_mi` suffix = **MIUI/HyperOS**. These files are not generic AOSP — they carry device categories and strategies designed for specific Xiaomi devices, and they do **not** exist in the original Xiaomi vendor (`aosp/odm/etc/` has no `audio_policy_engine_*` files at all).
 
-IndexerCertificate ini dipaksa aktif oleh property di vendor:
+They are force-activated by a property in the vendor:
 
 ```
 # vendor_a/build.prop:181
 ro.vendor.audio.policy.engine.odm=true
 ```
 
-### Bagaimana policy manager memilih file
+### How the policy manager picks the file
 
-Terd逆转 dari `AudioPolicyManagerImpl::loadAudioPolicyEngineConfigCustom()`
-(`system_ext/lib64/libaudiopolicymanagerimpl.so`, fungsi mulai di offset `0x386bc`):
+The reverse-engineered flow of `AudioPolicyManagerImpl::loadAudioPolicyEngineConfigCustom()`
+(`system_ext/lib64/libaudiopolicymanagerimpl.so`, function starting at offset `0x386bc`):
 
 ```asm
 ; x0 = "ro.boot.product.hardware.sku"
@@ -55,7 +55,7 @@ Terd逆转 dari `AudioPolicyManagerImpl::loadAudioPolicyEngineConfigCustom()`
 387e4: bl   stat(...)                  ; "/vendor/etc/audio_policy_engine_configuration.xml"
 ```
 
-Logikanya:
+The logic:
 
 ```
 sku = getprop("ro.boot.product.hardware.sku")
@@ -64,115 +64,115 @@ if sku == "mars"  →  stat("/odm/etc/audio_policy_engine_configuration_mi.xml")
 else              →  stat("/vendor/etc/audio_policy_engine_configuration.xml")
 ```
 
-Di device ini `ro.boot.product.hardware.sku = rgl`, jadi **seharusnya** membaca dari `/vendor/` — tapi property `policy.engine.odm=true` memaksa jalur ODM dan membuat table Xiaomi yang tidak cocok device tersebut dipakai.
+On this device `ro.boot.product.hardware.sku = rgl`, so it **should** read from `/vendor/` — but the `policy.engine.odm=true` property forces the ODM path and makes the mismatched Xiaomi tables get used on this device.
 
-### Gejala yang dihasilkan
+### Resulting symptoms
 
-Dump sebelum perbaikan:
+Dump before the fix:
 
 ```
 - VOLUME GROUP AUDIO_STREAM_MUSIC:  Max: 15
-- VOLUME GROUP AUDIO_STREAM_ALARM: Max:  0     ← tidak ada curve
-- VOLUME GROUP AUDIO_STREAM_SYSTEM: Max:  0    ← tidak ada curve
-- VOLUME GROUP AUDIO_STREAM_DTMF:  Max:  0     ← tidak ada curve
+- VOLUME GROUP AUDIO_STREAM_ALARM: Max:  0     ← no curve
+- VOLUME GROUP AUDIO_STREAM_SYSTEM: Max:  0    ← no curve
+- VOLUME GROUP AUDIO_STREAM_DTMF:  Max:  0     ← no curve
 ```
 
-`Max: 0` = **tidak ada volume curve sama sekali** untuk stream tersebut → tidak ada attenuation → output selalu di gain penuh.slider jadi tidak terasa.
+`Max: 0` = **no volume curve at all** for that stream → no attenuation → output is always at full gain, so the slider feels meaningless.
 
-Error di log:
-
-```
-E APM::VolumeCurve: Invalid device category 1 for Volume Curve    ← 47× per menit
-```
-
-`device category 1` = `DEVICE_CATEGORY_HEADSET`. Setiap kali volume diubah, lookup curve gagal → tidak ada attenuation.
-
-Selain itu, MIUI volume boost juga mati:
+Error in the log:
 
 ```
-D DeviceHalAidl: parameters: "volume_boost=0"                        ← 148×, selalu 0
+E APM::VolumeCurve: Invalid device category 1 for Volume Curve    ← 47× per minute
+```
+
+`device category 1` = `DEVICE_CATEGORY_HEADSET`. Every volume change fails the curve lookup → no attenuation.
+
+On top of that, the MIUI volume boost never activates:
+
+```
+D DeviceHalAidl: parameters: "volume_boost=0"                        ← 148×, always 0
 E AHAL_Telephony_QTI: configureVolumeBoost: invalid pal handle      ← 37×
 E DeviceHalAidl: parseAndSetVendorParameters Line: 412 Failed      ← 111×
 ```
 
 ---
 
-## 3. Perbandingan dengan Vendor yang Volume-nya Normal
+## 3. Comparison With the Vendor Whose Volume Works
 
-Perbandingan `hos/vendor_a` vs `aosp/vendor`:
+Comparison of `hos/vendor_a` vs `aosp/vendor`:
 
-| Aspek | `hos/vendor_a` | `aosp/vendor` |
+| Aspect | `hos/vendor_a` | `aosp/vendor` |
 |---|---|---|
 | Fingerprint | `Redmi/kunzite/kunzite:15/OS2.0.203.0.VPQCNXM` | `Redmi/kunzite_global/kunzite:15/OS3.0.301.0.WPQMIXM` |
-| `default_volume_tables.xml` | 5133 B | 5133 B — **identik byte-for-byte** |
-| `audio_policy_volumes.xml` | 13553 B, 71 entries | 14576 B, 71 entries — **20 entries beda** |
-| `ro.vendor.audio.policy.engine.odm` | `true` | `true` (sama) |
-| `ro.config.vc_call_vol_steps` | `11` | — (tidak ada) |
-| File `audio_policy_engine_*` di ODM | 4 file (MD5 mtime `Jan 1 2009`) | **0 file** |
+| `default_volume_tables.xml` | 5133 B | 5133 B — **identical byte-for-byte** |
+| `audio_policy_volumes.xml` | 13553 B, 71 entries | 14576 B, 71 entries — **20 entries differ** |
+| `ro.vendor.audio.policy.engine.odm` | `true` | `true` (same) |
+| `ro.config.vc_call_vol_steps` | `11` | — (not present) |
+| `audio_policy_engine_*` files in ODM | 4 files (MD5 mtime `Jan 1 2009`) | **0 files** |
 
-### Apa yang beda di `audio_policy_volumes.xml`
+### What differs in `audio_policy_volumes.xml`
 
-Vendor global memakai curve **eksplisit** untuk lebih banyak device category, dan limiter-nya lebih ketat di speaker:
+The global vendor uses **explicit** curves for more device categories, and its limiter is tighter on the speaker:
 
 | Stream / Category | `hos/vendor_a` | `aosp/vendor` (global) |
 |---|---|---|
-| MUSIC / HEADSET | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | eksplisit `1,-5750 → 100,0` |
-| MUSIC / EARPIECE | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | eksplisit `1,-5550 … 100,-600` |
-| MUSIC / EXT_MEDIA | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | eksplisit `1,-5800 … 100,0` |
-| SYSTEM / SPEAKER | `ref="DEFAULT_SYSTEM_VOLUME_CURVE"` | eksplisit `1,-2600 … 100,-800` |
+| MUSIC / HEADSET | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | explicit `1,-5750 → 100,0` |
+| MUSIC / EARPIECE | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | explicit `1,-5550 … 100,-600` |
+| MUSIC / EXT_MEDIA | `ref="DEFAULT_MEDIA_VOLUME_CURVE"` | explicit `1,-5800 … 100,0` |
+| SYSTEM / SPEAKER | `ref="DEFAULT_SYSTEM_VOLUME_CURVE"` | explicit `1,-2600 … 100,-800` |
 | SYSTEM / HEADSET | `1,-3000 … 100,-1800` | `1,-1800 … 100,-600` |
 | NOTIFICATION / SPEAKER | `1,-2970 … 100,0` | `1,-4200 … 100,-800` |
-| DTMF / SPEAKER | `ref="DEFAULT_SYSTEM_VOLUME_CURVE"` | eksplisit `1,-4200 … 100,-2800` |
-| ACCESSIBILITY / SPEAKER | `ref="DEFAULT_NON_MUTABLE_SPEAKER_VOLUME_CURVE"` | eksplisit `0,-5250 … 100,0` |
+| DTMF / SPEAKER | `ref="DEFAULT_SYSTEM_VOLUME_CURVE"` | explicit `1,-4200 … 100,-2800` |
+| ACCESSIBILITY / SPEAKER | `ref="DEFAULT_NON_MUTABLE_SPEAKER_VOLUME_CURVE"` | explicit `0,-5250 … 100,0` |
 
-Pola global: **speaker dibatasi** (SYSTEM/NOTIFICATION/DTMF tidak lagi `0` dB di max), sementara **earpiece/headset lebih terbuka**. Ini tuning "safe volume" yang lebih konservatif.
+Global pattern: **the speaker is limited** (SYSTEM/NOTIFICATION/DTMF no longer hit `0` dB at max), while **earpiece/headset are more open**. This is a more conservative "safe volume" tuning.
 
-Poin penting: **`default_volume_tables.xml` identik**. Yang rusak bukan tabel reference-nya, melainkan file engine yang disuntikkan ke ODM.
+Key point: **`default_volume_tables.xml` is identical**. The broken part is not the reference tables — it's the engine files injected into ODM.
 
 ---
 
-## 4. Perbaikan
+## 4. Fixes
 
-### 4.1 Hapus file Xiaomi dari ODM
+### 4.1 Delete the Xiaomi files from ODM
 
 ```bash
-# di device (root)
+# on device (root)
 adb shell su -c "mkdir -p /data/local/tmp/bak_audio"
 adb shell su -c "mv /odm/etc/audio_policy_engine_*.xml /data/local/tmp/bak_audio/"
 adb reboot
 ```
 
-Di repo MIO Kitchen:
+In the MIO Kitchen repo:
 
 ```
-hapus:
+delete:
   hos/odm_a/etc/audio_policy_engine_configuration_mi.xml
   hos/odm_a/etc/audio_policy_engine_default_stream_volumes.xml
   hos/odm_a/etc/audio_policy_engine_product_strategies.xml
   hos/odm_a/etc/audio_policy_engine_stream_volumes_mi.xml
 ```
 
-Entri di `config/odm_a_fs_config` dan `config/odm_a_file_contexts` **boleh dibiarkan** — `mkfs.erofs` mengabaikan entri untuk file yang tidak ada.
+The entries in `config/odm_a_fs_config` and `config/odm_a_file_contexts` **can be left as-is** — `mkfs.erofs` ignores entries for files that don't exist.
 
-### 4.2 Matikan property pengarah ODM
+### 4.2 Disable the ODM redirect property
 
-`hos/vendor_a/build.prop` baris **181**:
+`hos/vendor_a/build.prop` line **181**:
 
 ```
-# hapus / set false
+# delete the line / set to false
 ro.vendor.audio.policy.engine.odm=true
 ```
 
-### 4.3 Copy `audio_policy_volumes.xml` dari vendor AOSP (disarankan)
+### 4.3 Copy `audio_policy_volumes.xml` from the AOSP vendor (recommended)
 
-Curve volumenya di vendor Xiaomi CN biasanya pakai `ref="DEFAULT_MEDIA_VOLUME_CURVE"` yang referensinya tipis, sementara vendor global/AOSP punya curve **eksplisit** dan lebih konservatif untuk speaker (lihat perbandingan di bagian 3). Copy file dari vendor AOSP ke vendor yang dipakai port:
+The volume curves on the Xiaomi CN vendor usually use `ref="DEFAULT_MEDIA_VOLUME_CURVE"`, whose reference curves are thin, while the global/AOSP vendor has **explicit**, more conservative curves for the speaker (see the comparison in section 3). Copy the file from the AOSP vendor to the port's vendor:
 
 ```bash
-# di repo MIO Kitchen
+# in the MIO Kitchen repo
 cp aosp/vendor/etc/audio_policy_volumes.xml hos/vendor_a/etc/audio_policy_volumes.xml
 ```
 
-Atau langsung di device (root), path vendor yang aktif: `/vendor/etc/audio_policy_volumes.xml`:
+Or directly on the device (root) — the active vendor path is `/vendor/etc/audio_policy_volumes.xml`:
 
 ```bash
 adb push audio_policy_volumes.xml /data/local/tmp/
@@ -181,30 +181,28 @@ adb shell su -c "cp /data/local/tmp/audio_policy_volumes.xml /vendor/etc/audio_p
 adb reboot
 ```
 
-Catatan:
-- `default_volume_tables.xml` **tidak perlu** disentuh — file itu identik byte-for-byte antara kedua vendor.
-- Setelah langkah ini, curve MUSIC/HEADSET akan sama persis dengan AOSP global (`1,-5750 → 100,0`), dan speaker untuk SYSTEM/NOTIFICATION/DTMF tidak lagi `0` dB di volume maksimal.
-- Alternatif tanpa menyentuh vendor: salin file yang sama ke **`/odm/etc/`** — config engine ODM punya prioritas lebih tinggi dan akan menimpa file vendor.
+Notes:
+- `default_volume_tables.xml` does **not** need to be touched — that file is identical byte-for-byte between both vendors.
+- After this step, the MUSIC/HEADSET curve will exactly match AOSP global (`1,-5750 → 100,0`), and speaker curves for SYSTEM/NOTIFICATION/DTMF will no longer be `0` dB at max volume.
+- Alternative without touching the vendor: copy the same file to **`/odm/etc/`** — ODM engine config takes higher priority and overrides the vendor file.
 
----
+### 4.4 (Optional) Match the voice call steps
 
-### 4.4 (Opsional) Samakan voice call steps
-
-`hos/vendor_a/build.prop` baris **189**:
+`hos/vendor_a/build.prop` line **189**:
 
 ```
 ro.config.vc_call_vol_steps=11
 ```
 
-Property ini hanya ada di vendor CN, tidak di vendor global. Setelah perbaikan device melaporkan `VOICE_CALL Max: 15`, sedangkan default AOSP adalah 5. Hapus baris ini kalau call volume terasa tidak sesuai.
+This property only exists on the CN vendor, not the global one. After the fix the device reports `VOICE_CALL Max: 15`, while the AOSP default is 5. Delete this line if the call volume feels off.
 
 ---
 
-## 5. Verifikasi (Sebelum vs Sesudah)
+## 5. Verification (Before vs After)
 
 ### Volume group Max
 
-| Stream | Sebelum | Sesudah |
+| Stream | Before | After |
 |---|---|---|
 | MUSIC | 15 | 15 |
 | VOICE_CALL | 15 | 15 |
@@ -218,7 +216,7 @@ Property ini hanya ada di vendor CN, tidak di vendor global. Setelah perbaikan d
 | **TTS** | **0** | **15** ✓ |
 | **ENFORCED_AUDIBLE** | **0** | **7** ✓ |
 
-### Curve MUSIC setelah perbaikan
+### MUSIC curve after the fix
 
 ```
 DEVICE_CATEGORY_HEADSET    : { (1,-5750), (34,-3950), (66,-2000), (100,0) }
@@ -228,7 +226,7 @@ DEVICE_CATEGORY_EXT_MEDIA  : { (1,-5800), (26,-4200), (66,-1800), (100,0) }
 DEVICE_CATEGORY_HEARING_AID: { (1,-12700), (20,-8000), (60,-4000), (100,0) }
 ```
 
-`HEADSET -5750` dan `EXT_MEDIA -5800` persis sama dengan isi `aosp/vendor/etc/audio_policy_volumes.xml` — jadi fallback ke vendor + AOSP default sudah benar.
+`HEADSET -5750` and `EXT_MEDIA -5800` are exactly the same as in `aosp/vendor/etc/audio_policy_volumes.xml` — so the vendor + AOSP default fallback is correct.
 
 ### Error
 
@@ -236,22 +234,22 @@ DEVICE_CATEGORY_HEARING_AID: { (1,-12700), (20,-8000), (60,-4000), (100,0) }
 E APM::VolumeCurve: Invalid device category 1 for Volume Curve
 ```
 
-47× per menit → **0**.
+47× per minute → **0**.
 
 ---
 
-## 6. Catatan Tambahan
+## 6. Additional Notes
 
-### Jejak Xiaomi yang masih tertinggal
+### Xiaomi traces still remaining
 
 ```
-ro.vendor.audio.volume.boost.support=15     ← masih ada
+ro.vendor.audio.volume.boost.support=15     ← still present
 D VolumeDialogBoostMode: getBoostLevelText error, boostLevel = 0
 ```
 
-SystemUI port masih membawa kode MIUI yang menunggu volume boost, sementara boost-nya tidak pernah aktif. Ini hanya memengaruhi **label di dialog volume**, bukan level volume itu sendiri.和问题 tidak terkait.
+The ported SystemUI still carries MIUI code waiting for a volume boost, while the boost never activates. This only affects the **labels in the volume dialog**, not the actual volume level. Unrelated to the problem.
 
-### Service audio yang tidak ada di log boot
+### Audio services missing from the boot log
 
 ```
 E init: service vendor.audio-hal not found
@@ -260,9 +258,9 @@ E init: service vendor.audio-hal-4-0-msd not found
 E init: service audio_proxy_service not found
 ```
 
-Keempat service audio proprietary Xiaomi tidak ada di ROM port. Audio tetap berjalan karena AIDL HAL替代 mengambil alih. Tidak terkait dengan masalah volume.
+These four proprietary Xiaomi audio services don't exist in the ROM port. Audio still works because the AIDL HAL replacement takes over. Not related to the volume problem.
 
-### SKU audio
+### Audio SKU
 
 ```
 ro.boot.product.vendor.sku   = parrot
@@ -270,60 +268,60 @@ ro.boot.product.hardware.sku = rgl
 ro.vendor.qti.va_aosp.support = 1     → suffix "_qssi"
 ```
 
-SKU audio **termuat dengan benar** — `/vendor/etc/audio/sku_parrot/` berisi lengkap 13 file (mixer_paths, resourcemanager, audio_effects). Ini bukan penyebab masalah volume; sempat jadi suspect karena di port non-Xiaomi sering kosong.
+The audio SKU **loads correctly** — `/vendor/etc/audio/sku_parrot/` contains the complete 13 files (mixer_paths, resourcemanager, audio_effects). This is not the cause of the volume problem; it was briefly a suspect because on non-Xiaomi ports this directory is often empty.
 
 ---
 
-## 7. Perintah Diagnostik
+## 7. Diagnostic Commands
 
 ```bash
-# Status volume group
+# Volume group status
 adb shell dumpsys audio | grep -A 5 "VOLUME GROUP" | grep -E "VOLUME GROUP|Max:" | paste - - | sed 's/- VOLUME GROUP //'
 
-# Curve per stream
-adb shell dumpsys media.audio_policy | grep -A 20 "AUDIO_STREAM_MUSIC (id:"
+# Per-stream curves
+adb shell dumpsys media.audio_policy | grep -A 20 "AUDIO_STREAM_MUSIC (id:)"
 
-# Error policy
+# Policy errors
 adb logcat -c; adb shell input keyevent 24; sleep 3
 adb logcat -d | grep -E "VolumeCurve|volume_boost|AHAL_Telephony_QTI"
 
-# Konfirmasi file ODM sudah bersih
+# Confirm the ODM files are gone
 adb shell ls /odm/etc/ | grep -i audio
 adb shell getprop ro.vendor.audio.policy.engine.odm
 
-# Dump lengkap
+# Full dumps
 adb shell dumpsys audio
 adb shell dumpsys media.audio_policy
 ```
 
 ---
 
-## 8. Referensi Offset Binary
+## 8. Binary Offset Reference
 
 ### `system_ext/lib64/libaudiopolicymanagerimpl.so`
 
-Fungsi `AudioPolicyManagerImpl::loadAudioPolicyEngineConfigCustom()` di offset `0x386bc`:
+The `AudioPolicyManagerImpl::loadAudioPolicyEngineConfigCustom()` function at offset `0x386bc`:
 
 ```
-0x386bc  awal fungsi
+0x386bc  function start
 0x38700  x9 → "/odm/etc/audio_policy_engine_configuration_mi.xml"  (rodata 0x1cbf4)
 0x38718  x0 → "ro.boot.product.hardware.sku"                        (rodata 0x190d2)
 0x38760  bl property_get
 0x38768  w9 = 0x7372616d ("mars")
 0x3877c  cmp w8, w9        ; sku == "mars" ?
-0x387a0  bl stat           ; jalur ODM
-0x387e4  bl stat           ; jalur vendor
+0x387a0  bl stat           ; ODM path
+0x387e4  bl stat           ; vendor path
 ```
 
 ### `vendor/lib64/hw/libaudiocorehal.default.so`
 
-Fungsi build path config audio, offset `0xad90`:
+The audio config path-building function at offset `0xad90`:
 
 ```
 0xadb0  x0 → "ro.boot.product.vendor.sku"
 0xaddc  bl property_get
 0xade0  cmp w0, #0
-0xade4  b.le ...           ; nilai kosong → skip seluruh blok
+0xade4  b.le ...           ; empty value → skip the whole block
 0xae00  "/odm/etc"
 0xae14  "/vendor/etc/audio/sku_"
 0xae48  "_qssi"
@@ -332,19 +330,15 @@ Fungsi build path config audio, offset `0xad90`:
 0xaef0  "/system/etc"
 ```
 
-Branch A (SKU ada): `/odm/etc<sku>[_qssi]`, `/vendor/etc/audio/sku_<sku>`, `/vendor/etc/audio`, `/system/etc`
-Branch B (SKU kosong): `/odm/etc`, `/vendor/etc/audio`, `/vendor/etc`, `/system/etc`
+Branch A (SKU present): `/odm/etc<sku>[_qssi]`, `/vendor/etc/audio/sku_<sku>`, `/vendor/etc/audio`, `/system/etc`
+Branch B (SKU empty): `/odm/etc`, `/vendor/etc/audio`, `/vendor/etc`, `/system/etc`
 
 ---
 
-## 9. Kesimpulan
+## 9. Conclusion
 
-Penyebabnya **bukan** vendor, **bukan** SKU, dan **bukan** mixer path. Penyebabnya adalah empat file
-`audio_policy_engine_*.xml` Xiaomi HyperOS yang disuntikkan ke ODM, dikunci aktif oleh
-`ro.vendor.audio.policy.engine.odm=true`.
+The cause is **not** the vendor, **not** the SKU, and **not** the mixer paths. The cause is the four Xiaomi HyperOS `audio_policy_engine_*.xml` files injected into ODM, locked in by `ro.vendor.audio.policy.engine.odm=true`.
 
-File Xiaomi itu tidak cocok dengan device port → 7 volume group dapat `Max: 0` (tanpa curve) → tidak ada
-attenuation → volume mentok maksimal, plus 47 error `Invalid device category` per menit.
+Those Xiaomi files don't match the ported device → 7 volume groups get `Max: 0` (no curves) → no attenuation → volume is stuck at maximum, plus 47 `Invalid device category` errors per minute.
 
-Menghapus file dari ODM dan mematikan property-nya mengembalikan volume ke curve AOSP default yang
-lengkap dan konsisten.
+Deleting the files from ODM and disabling the property restores the volume to the complete, consistent AOSP default curves.
