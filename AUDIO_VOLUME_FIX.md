@@ -163,7 +163,32 @@ Entri di `config/odm_a_fs_config` dan `config/odm_a_file_contexts` **boleh dibia
 ro.vendor.audio.policy.engine.odm=true
 ```
 
-### 4.3 (Opsional) Samakan voice call steps
+### 4.3 Copy `audio_policy_volumes.xml` dari vendor AOSP (disarankan)
+
+Curve volumenya di vendor Xiaomi CN biasanya pakai `ref="DEFAULT_MEDIA_VOLUME_CURVE"` yang referensinya tipis, sementara vendor global/AOSP punya curve **eksplisit** dan lebih konservatif untuk speaker (lihat perbandingan di bagian 3). Copy file dari vendor AOSP ke vendor yang dipakai port:
+
+```bash
+# di repo MIO Kitchen
+cp aosp/vendor/etc/audio_policy_volumes.xml hos/vendor_a/etc/audio_policy_volumes.xml
+```
+
+Atau langsung di device (root), path vendor yang aktif: `/vendor/etc/audio_policy_volumes.xml`:
+
+```bash
+adb push audio_policy_volumes.xml /data/local/tmp/
+adb shell su -c "mount -o remount,rw /vendor"
+adb shell su -c "cp /data/local/tmp/audio_policy_volumes.xml /vendor/etc/audio_policy_volumes.xml"
+adb reboot
+```
+
+Catatan:
+- `default_volume_tables.xml` **tidak perlu** disentuh — file itu identik byte-for-byte antara kedua vendor.
+- Setelah langkah ini, curve MUSIC/HEADSET akan sama persis dengan AOSP global (`1,-5750 → 100,0`), dan speaker untuk SYSTEM/NOTIFICATION/DTMF tidak lagi `0` dB di volume maksimal.
+- Alternatif tanpa menyentuh vendor: salin file yang sama ke **`/odm/etc/`** — config engine ODM punya prioritas lebih tinggi dan akan menimpa file vendor.
+
+---
+
+### 4.4 (Opsional) Samakan voice call steps
 
 `hos/vendor_a/build.prop` baris **189**:
 
