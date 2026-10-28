@@ -1,6 +1,6 @@
 # Fix VoIP Call Mic Crash / Call Disconnected di ROM Port (Vendor Xiaomi `parrot`)
 
-**Device:** `moto g57` (codename `kunzite`) — Motorola HelloUI (Android 17) port yang memakai vendor Xiaomi Redmi Note (`ro.board.platform=parrot`, SM6450).  
+**Device:** `Redmi Note 15 5G` (codename `kunzite`) — menjalankan ROM port Motorola HelloUI (Android 17) yang memakai vendor Xiaomi `parrot` (`ro.board.platform=parrot`, SM6450).  
 **Target Android:** 17 · **Vendor Base:** Android 15/16/17 QTI Audio HAL AIDL  
 **Tanggal:** 2026-10-18  
 

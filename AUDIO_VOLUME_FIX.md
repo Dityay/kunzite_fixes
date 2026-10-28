@@ -1,6 +1,6 @@
 # Volume Stuck Max di ROM Port (vendor Xiaomi `parrot`)
 
-**Device:** `moto g57` (codename `kunzite`) — Motorola port yang memakai vendor Xiaomi Redmi Note 11 (`ro.board.platform=parrot`).
+**Device:** `Redmi Note 15 5G` (codename `kunzite`) — menjalankan ROM port Motorola HelloUI yang memakai vendor Xiaomi Redmi Note (`ro.board.platform=parrot`).
 **Target Android:** 17 · **Vendor OS:** Android 15 (HyperOS `OS2.0.203.0.VPQCNXM`)
 **Tanggal:** 2026-10-10
 

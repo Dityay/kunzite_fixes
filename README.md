@@ -1,6 +1,6 @@
 # kunzite_fixes
 
-Kumpulan catatan perbaikan (fix) untuk ROM port **Motorola moto g57 (codename `kunzite`)** — Motorola HelloUI (Android 17) yang memakai vendor Xiaomi `parrot` (Redmi Note / SM6450).
+Kumpulan catatan perbaikan (fix) untuk **Redmi Note 15 5G (codename `kunzite`)** yang menjalankan ROM port Motorola HelloUI (Android 17) memakai vendor Xiaomi `parrot` (SM6450).
 
 ## Isi
 
@@ -11,7 +11,7 @@ Kumpulan catatan perbaikan (fix) untuk ROM port **Motorola moto g57 (codename `k
 
 ## Device Info
 
-- **Device:** moto g57 (`kunzite`)
+- **Device:** Redmi Note 15 5G (`kunzite`)
 - **Platform:** Qualcomm SM6450 (`parrot`)
 - **Vendor base:** Xiaomi HyperOS Android 15 (`OS2.0.203.0.VPQCNXM`)
 - **ROM port:** Motorola HelloUI, Android 17
